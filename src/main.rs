@@ -2,11 +2,31 @@ mod firebase;
 mod git;
 mod storage;
 
+use std::process;
+
 use actix::{Actor, StreamHandler};
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, http::StatusCode};
 use actix_web_actors::ws;
 use serde::Deserialize;
-use envy::from_env;
+
+macro_rules! validate_pass {
+    ($req:expr) => {
+        // this would be much cleaner if we had if let chaining, soon tm
+        if let Some(v) = $req.headers().get("key") {
+            if CONFIG.password.len() == v.len() {
+                let mut result = 0;
+                for (x, y) in CONFIG.password.chars().zip(v.to_str().unwrap_or_default().chars()) {
+                    result |= x as u32 ^ y as u32;
+                }
+                result == 0
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    };
+}
 // use chrono::Weekday;
 
 // ping/keepalive
@@ -14,14 +34,14 @@ use envy::from_env;
 // binrecord
 
 #[derive(Deserialize, Debug)]
-struct Config {
-    period: usize,
-    max_folder_gb: f32,
-    password: String,
+pub struct Config {
+    pub period: usize,
+    pub max_folder_gb: f32,
+    pub password: String,
 }
 
 lazy_static::lazy_static! {
-    pub static ref CONFIG: Config = envy::from_env().unwrap();
+    pub static ref CONFIG: Config = envy::from_env::<Config>().unwrap();
 }
 
 // this is declared in chrono already, but we need to be able to deserialize it
@@ -36,6 +56,7 @@ enum Weekday {
     Sun,
 }
 
+// there are def better ways to do this but i am lazy
 impl From<Weekday> for chrono::Weekday {
     fn from(s: Weekday) -> Self {
         type C = chrono::Weekday;
@@ -47,12 +68,10 @@ impl From<Weekday> for chrono::Weekday {
             W::Thu => C::Thu,
             W::Fri => C::Fri,
             W::Sat => C::Sat,
-            _ => unimplemented!(),
+            W::Sun => C::Sun,
         }
     }
 }
-
-
 
 struct WsMsg;
 
@@ -61,11 +80,26 @@ impl Actor for WsMsg {
 }
 
 fn msg_dispatch(value: String) -> String {
-    if value.is_empty() {
+    if value.is_empty() || value.len() < CONFIG.password.len() {
         return String::from("Empty message not allowed");
     }
     let args: Vec<&str> = value.split_whitespace().collect();
-    match args[0] {
+    if args.len() < 2 {
+        return String::from("Expected at least two arguments");
+    }
+    let authed = if CONFIG.password.len() == args[0].len() {
+        let mut result = 0;
+        for (x, y) in CONFIG.password.chars().zip(args[0].chars()) {
+            result |= x as u32 ^ y as u32;
+        }
+        result == 0
+    } else {
+        false
+    };
+    if !authed {
+        return String::from("Invalid Password");
+    }
+    match args[1] {
         "URL" => {
             // return latest week
             if args.len() == 1 {
@@ -73,7 +107,7 @@ fn msg_dispatch(value: String) -> String {
             }
             let week: u8 = match args[1].parse() {
                 Ok(v) => v,
-                _ => return String::from("invalid week given"),
+                _ => return String::from("INVALID week given"),
             };
         },
         "JSONDATA" => {
@@ -94,7 +128,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsMsg {
     fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
         match msg {
             Ok(ws::Message::Ping(msg)) => ctx.pong(&msg),
-            Ok(ws::Message::Text(text)) => ctx.text(text),
+            Ok(ws::Message::Text(text)) => ctx.text(msg_dispatch(text.to_string())),
             _ => {},
         }
     }
@@ -107,18 +141,10 @@ async fn index(req: HttpRequest, stream: web::Payload) -> Result<HttpResponse, E
 }
 
 async fn shutdown(req: HttpRequest) -> Result<HttpResponse, Error> {
-    if let Some(v) = req.headers().get("key") {
-        if CONFIG.password.len() == msg.len() {
-            let mut result = 0;
-            for (x, y) in CONFIG.password.chars().zip(v.chars()) {
-                result |= x as u32 ^ y as u32;
-            }
-            result == 0
-        } else {
-            false
-        }
+    if validate_pass!(req) {
+        process::exit(0);
     }
-    Ok(HttpResponse::new(StatusCode::OK))
+    Ok(HttpResponse::new(StatusCode::UNAUTHORIZED))
 }
 
 #[actix_web::main]

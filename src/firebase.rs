@@ -1,8 +1,7 @@
 use firestore_db_and_auth::{documents, Credentials, ServiceSession};
 use serde::Deserialize;
-use std::fmt::Display;
 use std::path::Path;
-use anyhow::Error;
+use anyhow::{Result, anyhow};
 
 #[allow(dead_code)]
 #[derive(Deserialize, Debug)]
@@ -71,7 +70,7 @@ impl Firebase {
         for value in values {
             let (data, _doc) = match value {
                 Ok(v) => v,
-                Err(_) => return Err(),
+                Err(_) => return Err(anyhow!("")),
             };
             println!("{:?}", data);
         }
@@ -79,5 +78,8 @@ impl Firebase {
     }
     pub(crate) fn fetch_user_registration(email: &str) -> Self {
         unimplemented!();
+    }
+    pub(crate) fn fetch_storage<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        Ok(())
     }
 }
