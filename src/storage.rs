@@ -20,7 +20,7 @@ impl BinSet {
         let mut document_count = 0;
         // reuse this across hash attempts to prevent reallocations and preserve capacity
         let mut buf = Vec::new();
-        for file in read_dir(path).unwrap() {
+        for file in read_dir(path)? {
             let file = file?;
             if file.file_type()?.is_dir() {
                 continue;
@@ -63,6 +63,7 @@ impl Storage {
         if self.data.len() < 8 {
             return Ok(());
         }
+        // let mut new_ds = V
         Ok(())
     }
 }

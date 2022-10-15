@@ -2,11 +2,14 @@ mod firebase;
 mod git;
 mod storage;
 
-use std::process;
+use std::{process, time::Duration};
+use crate::firebase::Firebase;
 
-use actix::{Actor, StreamHandler};
+use actix::{Actor, StreamHandler, spawn};
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, http::StatusCode};
 use actix_web_actors::ws;
+use actix_cors::Cors;
+use std::sync::{Mutex, Arc};
 use serde::Deserialize;
 
 macro_rules! validate_pass {
@@ -35,13 +38,14 @@ macro_rules! validate_pass {
 
 #[derive(Deserialize, Debug)]
 pub struct Config {
-    pub period: usize,
+    pub period_cycle: u32,
     pub max_folder_gb: f32,
     pub password: String,
 }
 
 lazy_static::lazy_static! {
-    pub static ref CONFIG: Config = envy::from_env::<Config>().unwrap();
+    pub(crate) static ref CONFIG: Config = envy::from_env::<Config>().unwrap();
+    pub(crate) static ref FIREBASE: Arc<Mutex<Firebase>> = Arc::new(Mutex::new(Firebase::new("./cred.json").expect("No credentials found at that path")));
 }
 
 // this is declared in chrono already, but we need to be able to deserialize it
@@ -81,7 +85,7 @@ impl Actor for WsMsg {
 
 fn msg_dispatch(value: String) -> String {
     if value.is_empty() || value.len() < CONFIG.password.len() {
-        return String::from("Empty message not allowed");
+        return String::from("INVALID Empty message not allowed");
     }
     let args: Vec<&str> = value.split_whitespace().collect();
     if args.len() < 2 {
@@ -121,7 +125,7 @@ fn msg_dispatch(value: String) -> String {
         },
         _ => {},
     }
-    unimplemented!();
+    String::from("INVALID request")
 }
 
 impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsMsg {
@@ -135,9 +139,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsMsg {
 }
 
 async fn index(req: HttpRequest, stream: web::Payload) -> Result<HttpResponse, Error> {
-    let resp = ws::start(WsMsg {}, &req, stream);
-    println!("{:?}", resp);
-    resp
+    ws::start(WsMsg {}, &req, stream)
 }
 
 async fn shutdown(req: HttpRequest) -> Result<HttpResponse, Error> {
@@ -150,10 +152,17 @@ async fn shutdown(req: HttpRequest) -> Result<HttpResponse, Error> {
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     println!("Hello, world!");
+    spawn(async move {
+        loop {
+            std::thread::sleep(Duration::from_secs(CONFIG.period_cycle.into()));
+        }
+    });
     HttpServer::new(|| {
+            let cors = Cors::permissive();
             App::new()
-                .route("/ws/", web::get().to(index))
-                .route("/shutdown/", web::get().to(shutdown))
+                .wrap(cors)
+                .route("/ws", web::get().to(index))
+                .route("/shutdown", web::get().to(shutdown))
         }).bind(("127.0.0.1", 7930))?
         .run()
         .await

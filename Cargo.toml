@@ -13,6 +13,7 @@ actix = "0.13.0"
 firestore-db-and-auth = "0.6.1"
 serde = { version = "1.0.144", features = ["derive"] }
 serde_json = "1.0.85"
+ignore = "0.4.18"
 lazy_static = "1.4.0"
 envy = "0.4.2"
 async_once = "0.2.6"
