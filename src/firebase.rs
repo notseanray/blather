@@ -1,11 +1,14 @@
+use anyhow::{anyhow, Result};
+use std::error::Error;
 use firestore_db_and_auth::{documents, Credentials, ServiceSession};
 use serde::Deserialize;
-use std::path::Path;
-use anyhow::{Result, anyhow};
+use std::{path::Path, fs::read_dir};
+
+const STORED_LENGTH: usize = 8;
 
 #[allow(dead_code)]
 #[derive(Deserialize, Debug)]
-pub(crate) struct Skill {
+pub struct Skill {
     check: bool,
     level: u8,
     name: String,
@@ -21,7 +24,7 @@ enum GradYear {
 
 #[allow(dead_code)]
 #[derive(Deserialize, Debug)]
-pub(crate) struct RegistrationData {
+pub struct RegistrationData {
     admin: bool,
     cad_fill_in: String,
     cad_skills: Vec<Skill>,
@@ -64,22 +67,28 @@ impl Firebase {
         Ok(())
     }
     // todo change to result
-    pub(crate) fn fetch_registration(&self) -> Result<()> {
+    pub(crate) fn fetch_registration(&self) -> Result<Vec<RegistrationData>> {
         let values: documents::List<RegistrationData, _> =
             documents::list(&self.session, "registration_data");
-        for value in values {
-            let (data, _doc) = match value {
-                Ok(v) => v,
-                Err(_) => return Err(anyhow!("")),
-            };
-            println!("{:?}", data);
+        Ok(values.filter_map(|x| {
+            if let Ok((v, _)) = x {
+                Some(v)
+            } else {
+                None
+            }
+        }).collect())
+    }
+
+    // pub(crate) fn fetch_user_registration(&self, email: &str) -> Result<RegistrationData, firestore_db_and_auth::errors::FirebaseError> {
+    //     documents::read(&self.session, "registration_data", email)
+    // }
+
+    pub(crate) fn fetch_json_storage(&self) -> Result<Vec<RegistrationData>, Box<dyn Error>> {
+        let mut res = Vec::with_capacity(STORED_LENGTH);
+        for value in read_dir("./json_data")? {
+
+            // res.push(value)
         }
-        Ok(())
-    }
-    pub(crate) fn fetch_user_registration(email: &str) -> Self {
-        unimplemented!();
-    }
-    pub(crate) fn fetch_storage<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        Ok(())
+        Ok(res)
     }
 }

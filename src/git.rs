@@ -1,7 +1,7 @@
-use git2::{Repository, Commit};
 use anyhow::Result;
+use git2::{Commit, Repository};
 
-struct CommitPoint {
+pub struct CommitPoint {
     id: Vec<u8>,
     message: String,
 }
@@ -10,7 +10,7 @@ impl From<Commit<'_>> for CommitPoint {
     fn from(g: Commit<'_>) -> Self {
         Self {
             id: g.id().as_bytes().to_vec(),
-            message: g.message().unwrap().to_string()
+            message: g.message().unwrap().to_string(),
         }
     }
 }

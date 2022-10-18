@@ -1,9 +1,9 @@
-use std::{collections::VecDeque, path::Path, fs::read_dir, error::Error, io::Read};
-use std::fs::{File, self};
+use anyhow::{anyhow, Result};
 use blake3::Hasher;
-use anyhow::{Result, anyhow};
+use std::fs::{self, File};
+use std::{collections::VecDeque, error::Error, fs::read_dir, io::Read, path::Path};
 
-pub(crate) struct BinSet {
+pub struct BinSet {
     timestamp: u64,
     size: u64,
     document_count: usize,
@@ -39,31 +39,36 @@ impl BinSet {
         })
     }
 }
-//SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs()
 
 pub(crate) struct Storage {
     max_size: f32,
-    data: VecDeque<BinSet>,
+    data: Vec<BinSet>,
 }
 
 impl Storage {
     pub(crate) fn new(max_size: f32) -> Result<Self, Box<dyn Error>> {
-        let mut dataset = Vec::with_capacity(8);
+        let mut data = Vec::with_capacity(8);
         let _ = fs::create_dir("data");
         for folder in read_dir("data")? {
-            dataset.push(BinSet::from_folder(folder?.path())?);
+            data.push(BinSet::from_folder(folder?.path())?);
         }
-        dataset.sort_by_key(|x| x.timestamp);
-        // let data = VecDeque::with_capacity(dataset.len());
-        // take(&mut dataset);
-        let data = VecDeque::from_iter(dataset);
+        data.sort_by_key(|x| x.timestamp);
         Ok(Self { max_size, data })
     }
+
     pub(crate) fn update(&mut self) -> Result<()> {
         if self.data.len() < 8 {
             return Ok(());
         }
         // let mut new_ds = V
         Ok(())
+    }
+
+    pub fn dump(&self) -> Result<Vec<BinSet>, Box<dyn Error>> {
+        let mut set = Vec::with_capacity(8);
+        for folder in read_dir("body")? {
+            set.push(BinSet::from_folder(folder?.path())?);
+        }
+        Ok(set)
     }
 }

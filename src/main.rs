@@ -2,15 +2,22 @@ mod firebase;
 mod git;
 mod storage;
 
-use std::{process, time::Duration};
 use crate::firebase::Firebase;
-
-use actix::{Actor, StreamHandler, spawn};
-use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, http::StatusCode};
-use actix_web_actors::ws;
+use actix::{spawn, Actor, Context, Handler, Message, MessageResult, Recipient, StreamHandler};
 use actix_cors::Cors;
-use std::sync::{Mutex, Arc};
+use actix_web::{http::StatusCode, web, App, Error, HttpRequest, HttpResponse, HttpServer};
+use actix_web_actors::ws;
+use firebase::RegistrationData;
+use git::CommitPoint;
 use serde::Deserialize;
+use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashMap,
+    process,
+    sync::atomic::AtomicU64,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+use storage::{BinSet, Storage};
 
 macro_rules! validate_pass {
     ($req:expr) => {
@@ -18,7 +25,11 @@ macro_rules! validate_pass {
         if let Some(v) = $req.headers().get("key") {
             if CONFIG.password.len() == v.len() {
                 let mut result = 0;
-                for (x, y) in CONFIG.password.chars().zip(v.to_str().unwrap_or_default().chars()) {
+                for (x, y) in CONFIG
+                    .password
+                    .chars()
+                    .zip(v.to_str().unwrap_or_default().chars())
+                {
                     result |= x as u32 ^ y as u32;
                 }
                 result == 0
@@ -46,6 +57,7 @@ pub struct Config {
 lazy_static::lazy_static! {
     pub(crate) static ref CONFIG: Config = envy::from_env::<Config>().unwrap();
     pub(crate) static ref FIREBASE: Arc<Mutex<Firebase>> = Arc::new(Mutex::new(Firebase::new("./cred.json").expect("No credentials found at that path")));
+    pub(crate) static ref STORAGE: Storage = Storage::new(CONFIG.max_folder_gb).expect("failed to init bin storage");
 }
 
 // this is declared in chrono already, but we need to be able to deserialize it
@@ -77,7 +89,81 @@ impl From<Weekday> for chrono::Weekday {
     }
 }
 
-struct WsMsg;
+struct UrlMsg {
+    week: Option<u32>,
+}
+
+impl Message for UrlMsg {
+    type Result = String;
+}
+
+struct JsonLatest;
+
+impl Message for JsonLatest {
+    type Result = String;
+}
+
+struct JsonRecord;
+
+impl Message for JsonRecord {
+    type Result = Vec<CommitPoint>;
+}
+
+struct JsonData;
+
+impl Message for JsonData {
+    type Result = Vec<RegistrationData>;
+}
+
+impl Handler<JsonData> for ConnectedClients {
+    type Result = MessageResult<JsonData>;
+    fn handle(&mut self, msg: JsonData, ctx: &mut Self::Context) -> Self::Result {
+        // MessageResponse()
+        unimplemented!();
+    }
+}
+
+struct BinRecord;
+
+impl Message for BinRecord {
+    type Result = Vec<BinSet>;
+}
+
+impl Handler<BinRecord> for ConnectedClients {
+    type Result = MessageResult<BinRecord>;
+    fn handle(&mut self, _: BinRecord, _: &mut Context<Self>) -> Self::Result {
+        MessageResult(STORAGE.dump().unwrap_or_default())
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct MessageResponse(pub String);
+
+#[derive(Default)]
+struct ConnectedClients {
+    sessions: HashMap<usize, Recipient<MessageResponse>>,
+}
+
+impl Actor for ConnectedClients {
+    type Context = Context<Self>;
+}
+
+struct WsMsg {
+    pub hb: Instant,
+    pub req: AtomicU64,
+    pub name: String,
+}
+
+impl Default for WsMsg {
+    fn default() -> Self {
+        Self {
+            hb: Instant::now(),
+            req: AtomicU64::from(0),
+            name: String::default(),
+        }
+    }
+}
 
 impl Actor for WsMsg {
     type Context = ws::WebsocketContext<Self>;
@@ -106,46 +192,69 @@ fn msg_dispatch(value: String) -> String {
     match args[1] {
         "URL" => {
             // return latest week
-            if args.len() == 1 {
-                unimplemented!();
+            if args.len() == 2 {
+                return String::from("test");
             }
-            let week: u8 = match args[1].parse() {
+            let week: u8 = match args[2].parse() {
                 Ok(v) => v,
                 _ => return String::from("INVALID week given"),
             };
-        },
+        }
+        "JSONLATEST" => {}
         "JSONDATA" => {
             // return requested json data
-        },
+        }
         "JSONRECORD" => {
             // return a short record of json backups
-        },
+        }
         "BINRECORD" => {
             // return a short record of bin dumps
-        },
-        _ => {},
+        }
+        _ => {}
     }
     String::from("INVALID request")
 }
 
 impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsMsg {
     fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
+        let msg = match msg {
+            Ok(v) => v,
+            _ => return,
+        };
         match msg {
-            Ok(ws::Message::Ping(msg)) => ctx.pong(&msg),
-            Ok(ws::Message::Text(text)) => ctx.text(msg_dispatch(text.to_string())),
-            _ => {},
+            ws::Message::Ping(_) => ctx.pong(
+                &SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("clock went backward")
+                    .as_millis()
+                    .to_le_bytes(),
+            ),
+            ws::Message::Text(text) => ctx.text(msg_dispatch(text.to_string())),
+            _ => {}
         }
     }
 }
 
 async fn index(req: HttpRequest, stream: web::Payload) -> Result<HttpResponse, Error> {
-    ws::start(WsMsg {}, &req, stream)
+    ws::start(WsMsg::default(), &req, stream)
 }
 
 async fn shutdown(req: HttpRequest) -> Result<HttpResponse, Error> {
     if validate_pass!(req) {
         process::exit(0);
     }
+    Ok(HttpResponse::new(StatusCode::UNAUTHORIZED))
+}
+
+async fn new_json_backup(req: HttpRequest) -> Result<HttpResponse, Error> {
+    Ok(HttpResponse::new(StatusCode::UNAUTHORIZED))
+}
+
+async fn new_bin_backup(req: HttpRequest) -> Result<HttpResponse, Error> {
+    Ok(HttpResponse::new(StatusCode::UNAUTHORIZED))
+}
+
+async fn refresh_session(req: HttpRequest) -> Result<HttpResponse, Error> {
     Ok(HttpResponse::new(StatusCode::UNAUTHORIZED))
 }
 
@@ -158,12 +267,16 @@ async fn main() -> std::io::Result<()> {
         }
     });
     HttpServer::new(|| {
-            let cors = Cors::permissive();
-            App::new()
-                .wrap(cors)
-                .route("/ws", web::get().to(index))
-                .route("/shutdown", web::get().to(shutdown))
-        }).bind(("127.0.0.1", 7930))?
-        .run()
-        .await
+        let cors = Cors::permissive();
+        App::new()
+            .wrap(cors)
+            .route("/ws", web::get().to(index))
+            .route("/shutdown", web::get().to(shutdown))
+            .route("/refresh/session", web::get().to(refresh_session))
+            .route("/new/jsonbackup", web::get().to(new_json_backup))
+            .route("/new/binbackup", web::get().to(new_bin_backup))
+    })
+    .bind(("127.0.0.1", 7930))?
+    .run()
+    .await
 }
