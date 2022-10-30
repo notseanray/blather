@@ -8,7 +8,7 @@ use actix_cors::Cors;
 use actix_web::{http::StatusCode, web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_web_actors::ws;
 use firebase::RegistrationData;
-use git::CommitPoint;
+use git::{CommitPoint, GitStorage};
 use serde::Deserialize;
 use std::sync::{Arc, Mutex};
 use std::{
@@ -42,10 +42,6 @@ macro_rules! validate_pass {
     };
 }
 // use chrono::Weekday;
-
-// ping/keepalive
-// jsonrecord
-// binrecord
 
 #[derive(Deserialize, Debug)]
 pub struct Config {
@@ -89,24 +85,22 @@ impl From<Weekday> for chrono::Weekday {
     }
 }
 
-struct UrlMsg {
-    week: Option<u32>,
-}
-
-impl Message for UrlMsg {
-    type Result = String;
-}
-
-struct JsonLatest;
-
-impl Message for JsonLatest {
-    type Result = String;
-}
-
 struct JsonRecord;
 
 impl Message for JsonRecord {
     type Result = Vec<CommitPoint>;
+}
+
+// git record of all commits
+impl Handler<JsonRecord> for ConnectedClients {
+    type Result = MessageResult<JsonRecord>;
+    fn handle(&mut self, _msg: JsonRecord, _ctx: &mut Self::Context) -> Self::Result {
+        MessageResult(if let Ok(v) = GitStorage::init() {
+            v.get_commits().clone()
+        } else {
+            vec![]
+        })
+    }
 }
 
 struct JsonData;
@@ -117,9 +111,13 @@ impl Message for JsonData {
 
 impl Handler<JsonData> for ConnectedClients {
     type Result = MessageResult<JsonData>;
-    fn handle(&mut self, msg: JsonData, ctx: &mut Self::Context) -> Self::Result {
-        // MessageResponse()
-        unimplemented!();
+    fn handle(&mut self, _msg: JsonData, _ctx: &mut Self::Context) -> Self::Result {
+        if let Ok(v) = FIREBASE.lock() {
+            if let Ok(v) = v.fetch_json_storage() {
+                return MessageResult(v);
+            }
+        }
+        MessageResult(vec![])
     }
 }
 
@@ -132,7 +130,7 @@ impl Message for BinRecord {
 impl Handler<BinRecord> for ConnectedClients {
     type Result = MessageResult<BinRecord>;
     fn handle(&mut self, _: BinRecord, _: &mut Context<Self>) -> Self::Result {
-        MessageResult(STORAGE.dump().unwrap_or_default())
+        MessageResult(STORAGE.dump().clone())
     }
 }
 

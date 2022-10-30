@@ -1,6 +1,8 @@
 use anyhow::Result;
+use actix::Message;
 use git2::{Commit, Repository};
 
+#[derive(Clone)]
 pub struct CommitPoint {
     id: Vec<u8>,
     message: String,
@@ -15,6 +17,10 @@ impl From<Commit<'_>> for CommitPoint {
     }
 }
 
+impl Message for CommitPoint {
+    type Result = Vec<CommitPoint>;
+}
+
 #[derive(Default)]
 pub(crate) struct GitStorage {
     storages: Vec<CommitPoint>,
@@ -25,6 +31,9 @@ impl GitStorage {
         let mut storage = Self::default();
         storage.fetch_commits()?;
         Ok(storage)
+    }
+    pub fn get_commits(&self) -> &Vec<CommitPoint> {
+        &self.storages
     }
     fn fetch_commits(&mut self) -> Result<()> {
         let repo = Repository::open("./data")?;

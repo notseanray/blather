@@ -1,8 +1,9 @@
 use anyhow::{anyhow, Result};
 use blake3::Hasher;
 use std::fs::{self, File};
-use std::{collections::VecDeque, error::Error, fs::read_dir, io::Read, path::Path};
+use std::{error::Error, fs::read_dir, io::Read, path::Path};
 
+#[derive(Clone)]
 pub struct BinSet {
     timestamp: u64,
     size: u64,
@@ -56,7 +57,7 @@ impl Storage {
         Ok(Self { max_size, data })
     }
 
-    pub(crate) fn update(&mut self) -> Result<()> {
+    pub(crate) fn new_download(&mut self) -> Result<()> {
         if self.data.len() < 8 {
             return Ok(());
         }
@@ -64,11 +65,16 @@ impl Storage {
         Ok(())
     }
 
-    pub fn dump(&self) -> Result<Vec<BinSet>, Box<dyn Error>> {
+    fn update(&mut self) -> Result<(), Box<dyn Error>> {
         let mut set = Vec::with_capacity(8);
-        for folder in read_dir("body")? {
+        for folder in read_dir("data")? {
             set.push(BinSet::from_folder(folder?.path())?);
         }
-        Ok(set)
+        self.data = set;
+        Ok(())
+    }
+
+    pub(crate) fn dump(&self) -> &Vec<BinSet> {
+        &self.data
     }
 }

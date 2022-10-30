@@ -1,13 +1,18 @@
-use anyhow::{anyhow, Result};
-use std::error::Error;
+use anyhow::Result;
 use firestore_db_and_auth::{documents, Credentials, ServiceSession};
-use serde::Deserialize;
-use std::{path::Path, fs::read_dir};
+use serde::{Deserialize, Serialize};
+use std::error::Error;
+use std::{
+    fs::{read_dir, read_to_string},
+    path::Path,
+};
+
+use crate::git::CommitPoint;
 
 const STORED_LENGTH: usize = 8;
 
 #[allow(dead_code)]
-#[derive(Deserialize, Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Skill {
     check: bool,
     level: u8,
@@ -15,7 +20,7 @@ pub struct Skill {
 }
 
 // this layout is inconsistent for some reason, must have this
-#[derive(Deserialize, Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 enum GradYear {
     Str(String),
@@ -23,7 +28,7 @@ enum GradYear {
 }
 
 #[allow(dead_code)]
-#[derive(Deserialize, Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct RegistrationData {
     admin: bool,
     cad_fill_in: String,
@@ -70,13 +75,9 @@ impl Firebase {
     pub(crate) fn fetch_registration(&self) -> Result<Vec<RegistrationData>> {
         let values: documents::List<RegistrationData, _> =
             documents::list(&self.session, "registration_data");
-        Ok(values.filter_map(|x| {
-            if let Ok((v, _)) = x {
-                Some(v)
-            } else {
-                None
-            }
-        }).collect())
+        Ok(values
+            .filter_map(|x| if let Ok((v, _)) = x { Some(v) } else { None })
+            .collect())
     }
 
     // pub(crate) fn fetch_user_registration(&self, email: &str) -> Result<RegistrationData, firestore_db_and_auth::errors::FirebaseError> {
@@ -84,11 +85,10 @@ impl Firebase {
     // }
 
     pub(crate) fn fetch_json_storage(&self) -> Result<Vec<RegistrationData>, Box<dyn Error>> {
-        let mut res = Vec::with_capacity(STORED_LENGTH);
-        for value in read_dir("./json_data")? {
-
-            // res.push(value)
-        }
-        Ok(res)
+        Ok(read_dir("./json_data")?
+            .filter_map(|x| read_to_string(x.ok()?.path()).ok())
+            .filter_map(|x| serde_json::from_str::<Vec<RegistrationData>>(&x).ok())
+            .flatten()
+            .collect())
     }
 }
